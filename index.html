@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0a1426">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Term Clock">
+<meta name="description" content="Countdown to noon ET, January 20, 2029, when Donald Trump's term ends.">
+<style>
+  :root { color-scheme: light; padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+  body { margin: 0; font-size: 14px; }
+  [hidden] { display: none !important; }
+</style>
+<title>Trump Term Clock</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=Public+Sans:wght@400;500;600&display=swap">
+<style>
+  /* Layout: a phone-width stack of two widget cards, then the term bar and the statutory calendar. */
+  :root {
+    --ground: #eef1f6;
+    --card: #ffffff;
+    --ink: #13213d;
+    --muted: #5a6680;
+    --rule: #d6dce8;
+    --red: #b8202f;
+    --blue: #1f3f7a;
+    --track: #dfe4ee;
+    --display: "Big Shoulders Display", "Arial Narrow", Impact, sans-serif;
+    --body: "Public Sans", -apple-system, "Segoe UI", system-ui, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #0a1426; --card: #12203a; --ink: #f1f4fa; --muted: #9aa7c2;
+      --rule: #23345a; --red: #ff5a64; --blue: #7fa6ff; --track: #22345a; color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #0a1426; --card: #12203a; --ink: #f1f4fa; --muted: #9aa7c2;
+    --rule: #23345a; --red: #ff5a64; --blue: #7fa6ff; --track: #22345a; color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    background: var(--ground); color: var(--ink); font-family: var(--body);
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-block: 20px 32px;
+  }
+  main { max-width: 440px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
+
+  .card {
+    background: var(--card); border-radius: 22px; padding: 18px 20px 20px;
+    display: flex; flex-direction: column; gap: 6px;
+    box-shadow: 0 1px 2px rgba(19,33,61,.06), 0 8px 24px rgba(19,33,61,.06);
+  }
+  .eyebrow {
+    display: flex; justify-content: space-between; align-items: baseline; gap: 12px;
+    font-size: 12px; font-weight: 600; letter-spacing: .09em; text-transform: uppercase; color: var(--muted);
+  }
+  .eyebrow .tag { color: var(--red); }
+  .card.term .eyebrow .tag { color: var(--blue); }
+  .days {
+    font-family: var(--display); font-weight: 900; line-height: .9;
+    font-size: clamp(76px, 26vw, 112px); letter-spacing: -.01em; font-variant-numeric: tabular-nums;
+    display: flex; align-items: baseline; gap: 10px;
+  }
+  .days small { font-size: .32em; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+  .clock { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 6px; }
+  .unit { border-top: 2px solid var(--rule); padding-top: 6px; }
+  .unit b { display: block; font-family: var(--display); font-weight: 700; font-size: 30px; font-variant-numeric: tabular-nums; }
+  .unit span { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  .card.election .unit:first-child { border-color: var(--red); }
+  .card.term .unit:first-child { border-color: var(--blue); }
+  .when { font-size: 13px; color: var(--muted); margin-top: 6px; }
+
+  .term-bar { padding: 4px 4px 0; display: flex; flex-direction: column; gap: 8px; }
+  .term-bar .row { display: flex; justify-content: space-between; font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .term-bar .row strong { color: var(--ink); font-weight: 600; }
+  .track { height: 10px; border-radius: 5px; background: var(--track); overflow: hidden; }
+  .fill { height: 100%; width: 0; background: linear-gradient(90deg, var(--blue), var(--red)); border-radius: 5px; }
+
+  .calendar { margin-top: 10px; }
+  .calendar h2 { font-family: var(--display); font-weight: 700; font-size: 20px; letter-spacing: .03em; text-transform: uppercase; margin: 0 0 8px 4px; text-wrap: balance; }
+  .calendar ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+  .calendar li {
+    display: grid; grid-template-columns: 74px 1fr auto; gap: 12px; align-items: baseline;
+    padding: 11px 4px; border-top: 1px solid var(--rule); font-size: 14px;
+  }
+  .calendar li > div { min-width: 0; }
+  .calendar .date { font-weight: 600; font-variant-numeric: tabular-nums; }
+  .calendar .basis { display: block; font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .calendar .left { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .calendar li.past { opacity: .5; }
+
+  .hint { font-size: 12px; color: var(--muted); text-align: center; margin-top: 8px; line-height: 1.5; }
+  /* Celebration: one fixed look in both themes (night sky, fireworks). */
+  :root { --party-bg: rgba(8, 16, 34, .94); --party-ink: #ffffff; --party-gold: #ffd166; --party-muted: #c9d3ea; }
+  #fx { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 30; }
+  .party {
+    position: fixed; inset: 0; z-index: 20; background: var(--party-bg); color: var(--party-ink);
+    display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 14px;
+    padding: calc(24px + env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) calc(24px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
+  }
+  .party .kicker { font-size: 13px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: var(--party-gold); }
+  .party h1 {
+    margin: 0; font-family: var(--display); font-weight: 900; line-height: .85; text-transform: uppercase;
+    font-size: clamp(88px, 30vw, 200px); text-wrap: balance;
+    text-shadow: 0 0 40px rgba(255, 209, 102, .45);
+    animation: pop 900ms cubic-bezier(.2, 1.6, .4, 1) both, glow 1.6s ease-in-out 900ms infinite alternate;
+  }
+  .party p { margin: 0; max-width: 30ch; font-size: 18px; line-height: 1.45; color: var(--party-muted); }
+  .party p strong { color: var(--party-ink); }
+  .party .tally { font-family: var(--display); font-weight: 700; font-size: 26px; letter-spacing: .04em; color: var(--party-gold); }
+  .party button, .preview-btn {
+    font: 600 15px var(--body); border-radius: 999px; padding: 11px 22px; cursor: pointer;
+  }
+  .party button { margin-top: 10px; background: transparent; color: var(--party-ink); border: 1.5px solid var(--party-muted); }
+  .preview-btn { display: block; margin: 4px auto 0; background: var(--card); color: var(--ink); border: 1.5px solid var(--rule); }
+  .party button:focus-visible, .preview-btn:focus-visible { outline: 3px solid var(--party-gold); outline-offset: 3px; }
+  .party .tag { font-size: 12px; letter-spacing: .1em; text-transform: uppercase; border: 1px solid var(--party-muted); border-radius: 999px; padding: 4px 10px; color: var(--party-muted); }
+  @keyframes pop { from { transform: scale(.3) rotate(-6deg); opacity: 0; } to { transform: none; opacity: 1; } }
+  @keyframes glow { to { text-shadow: 0 0 70px rgba(255, 209, 102, .85), 0 0 12px rgba(255, 255, 255, .6); } }
+  @media (prefers-reduced-motion: reduce) { .party h1 { animation: none; } }
+</style>
+</head>
+<body>
+
+<main>
+  <section class="card term" data-target="2029-01-20T17:00:00Z" aria-label="Countdown to the end of the current presidential term">
+    <div class="eyebrow"><span>Trump's term ends</span><span class="tag">20th Amend.</span></div>
+    <div class="days"><span data-d>–</span><small>days</small></div>
+    <div class="clock">
+      <div class="unit"><b data-h>00</b><span>hours</span></div>
+      <div class="unit"><b data-m>00</b><span>minutes</span></div>
+      <div class="unit"><b data-s>00</b><span>seconds</span></div>
+    </div>
+    <div class="when">Saturday, January 20, 2029 · noon ET</div>
+  </section>
+
+  <div class="term-bar">
+    <div class="row"><span>Term served</span><strong id="pct">–</strong></div>
+    <div class="track"><div class="fill" id="fill"></div></div>
+    <div class="row"><span id="served">–</span><span>of 1,461 days</span></div>
+  </div>
+
+  <p class="hint">On your phone, open this page and use Share → Add to Home Screen to keep it one tap away.</p>
+  <button class="preview-btn" id="preview" type="button">Preview the celebration</button>
+</main>
+
+<div class="party" id="party" role="dialog" aria-modal="true" aria-labelledby="party-title" hidden>
+  <span class="tag" id="party-preview" hidden>Preview</span>
+  <div class="kicker">Noon ET · January 20, 2029</div>
+  <h1 id="party-title">It's over!</h1>
+  <p><strong>Donald Trump is no longer President of the United States.</strong> The term is done.</p>
+  <div class="tally">1,461 days. Zero to go.</div>
+  <button type="button" id="party-close">Close</button>
+</div>
+<canvas id="fx" aria-hidden="true" hidden></canvas>
+
+<script>
+  const TERM_START = Date.parse("2025-01-20T17:00:00Z");
+  const TERM_END = Date.parse("2029-01-20T17:00:00Z");
+  const pad = n => String(n).padStart(2, "0");
+  const fmt = n => n.toLocaleString("en-US");
+
+  function split(ms) {
+    let s = Math.max(0, Math.floor(ms / 1000));
+    return { d: Math.floor(s / 86400), h: Math.floor(s % 86400 / 3600), m: Math.floor(s % 3600 / 60), s: s % 60 };
+  }
+
+  function tick() {
+    const now = Date.now();
+    document.querySelectorAll(".card[data-target]").forEach(card => {
+      const t = split(Date.parse(card.dataset.target) - now);
+      card.querySelector("[data-d]").textContent = fmt(t.d);
+      card.querySelector("[data-h]").textContent = pad(t.h);
+      card.querySelector("[data-m]").textContent = pad(t.m);
+      card.querySelector("[data-s]").textContent = pad(t.s);
+    });
+
+    const frac = Math.min(1, Math.max(0, (now - TERM_START) / (TERM_END - TERM_START)));
+    document.getElementById("fill").style.width = (frac * 100).toFixed(3) + "%";
+    document.getElementById("pct").textContent = (frac * 100).toFixed(2) + "%";
+    document.getElementById("served").textContent = fmt(Math.floor((now - TERM_START) / 86400000)) + " days served";
+
+  }
+  // Celebration: confetti rain plus red, white, blue and gold fireworks.
+  const party = document.getElementById("party");
+  const cv = document.getElementById("fx");
+  const ctx = cv.getContext("2d");
+  const COLORS = ["#ff3b4a", "#ffffff", "#4d7cff", "#ffd166"];
+  const calm = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  let bits = [], running = false, until = 0, lastBurst = 0, celebrated = false;
+
+  function size() {
+    const r = devicePixelRatio || 1;
+    cv.width = innerWidth * r; cv.height = innerHeight * r;
+    ctx.setTransform(r, 0, 0, r, 0, 0);
+  }
+  function burst(x, y) {
+    const c = COLORS[Math.floor(Math.random() * COLORS.length)];
+    for (let i = 0; i < 80; i++) {
+      const a = Math.random() * Math.PI * 2, v = 2 + Math.random() * 6;
+      bits.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life: 60 + Math.random() * 30, c, spark: true });
+    }
+  }
+  function confetti(n) {
+    for (let i = 0; i < n; i++) bits.push({
+      x: Math.random() * innerWidth, y: -10, vx: (Math.random() - .5) * 2, vy: 2 + Math.random() * 3,
+      life: 400, c: COLORS[Math.floor(Math.random() * COLORS.length)], rot: Math.random() * 6, spin: (Math.random() - .5) * .3, spark: false
+    });
+  }
+  function frame(t) {
+    ctx.clearRect(0, 0, innerWidth, innerHeight);
+    const live = t < until;
+    if (live) {
+      confetti(3);
+      if (t - lastBurst > 650) { burst(innerWidth * (.15 + Math.random() * .7), innerHeight * (.1 + Math.random() * .4)); lastBurst = t; }
+    }
+    bits = bits.filter(b => (b.life -= 1) > 0 && b.y < innerHeight + 20);
+    for (const b of bits) {
+      b.x += b.vx; b.y += b.vy;
+      if (b.spark) { b.vy += .06; b.vx *= .985; b.vy *= .985; ctx.globalAlpha = Math.min(1, b.life / 40); ctx.fillStyle = b.c; ctx.fillRect(b.x, b.y, 3, 3); }
+      else { b.rot += b.spin; ctx.globalAlpha = 1; ctx.save(); ctx.translate(b.x, b.y); ctx.rotate(b.rot); ctx.fillStyle = b.c; ctx.fillRect(-5, -3, 10, 6); ctx.restore(); }
+    }
+    ctx.globalAlpha = 1;
+    if (live || bits.length) requestAnimationFrame(frame);
+    else { running = false; cv.hidden = true; }
+  }
+  function celebrate(preview) {
+    document.getElementById("party-preview").hidden = !preview;
+    party.hidden = false;
+    document.getElementById("party-close").focus();
+    if (calm) return;
+    size(); cv.hidden = false;
+    until = performance.now() + (preview ? 12000 : 120000);
+    if (!running) { running = true; requestAnimationFrame(frame); }
+  }
+  function stop() { party.hidden = true; until = 0; }
+
+  addEventListener("resize", () => { if (running) size(); });
+  document.getElementById("preview").addEventListener("click", () => celebrate(true));
+  document.getElementById("party-close").addEventListener("click", stop);
+  addEventListener("keydown", e => { if (e.key === "Escape" && !party.hidden) stop(); });
+
+  function loop() {
+    tick();
+    if (!celebrated && Date.now() >= TERM_END) {
+      celebrated = true;
+      document.getElementById("preview").hidden = true;
+      celebrate(false);
+    }
+  }
+  loop();
+  setInterval(loop, 1000);
+</script>
+
+</body>
+</html>
