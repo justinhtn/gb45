@@ -7,14 +7,14 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Race Weather">
-<meta name="description" content="Weather, estimated track temperature and live satellite and radar for every remaining 2026 and every 2027 Formula 1 race.">
+<meta name="description" content="Weather, track temperature, storm arrival by corner, a 3D satellite and radar map, and tyre strategy for every remaining 2026 and every 2027 Formula 1 race.">
 <title>F1 Race Weather</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Titillium+Web:wght@400;600;700;900&family=JetBrains+Mono:wght@500;700&display=swap">
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.css">
 <style>
-  /* Layout: pit-wall screen. Next race up top with its map, then the season as a timing-sheet list. Single dark look by design. */
+  /* Layout: pit-wall screen. Selected race + map on top, storm watch + strategy beneath, season timing sheet last. Single dark look by design. */
   :root {
     color-scheme: dark;
     --bg: #11161d;
@@ -27,6 +27,8 @@
     --track: #ff4d5e;
     --rain: #4cc3ff;
     --storm: #ffd23f;
+    /* Pirelli compound colours */
+    --soft: #ff3b3b; --medium: #ffd23f; --hard: #f1f1f1; --inter: #3fbf4f; --wet: #2f8fff;
     --display: "Titillium Web", "Segoe UI", system-ui, sans-serif;
     --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
   }
@@ -39,12 +41,12 @@
     padding-block: 16px 40px;
   }
   [hidden] { display: none !important; }
-  .wrap { max-width: 1080px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
+  .wrap { max-width: 1120px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
   button { font: inherit; color: inherit; }
-  button:focus-visible, .race:focus-visible { outline: 2px solid var(--storm); outline-offset: 2px; }
+  button:focus-visible, .race:focus-visible, input:focus-visible { outline: 2px solid var(--storm); outline-offset: 2px; }
 
   header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
-  .brand { display: flex; align-items: baseline; gap: 10px; }
+  .brand { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
   .brand h1 { margin: 0; font-weight: 900; font-size: 26px; letter-spacing: .01em; text-transform: uppercase; font-style: italic; }
   .brand h1 span { color: var(--track); }
   .brand small { color: var(--muted); font-size: 13px; }
@@ -53,10 +55,11 @@
   .seg button[aria-pressed="true"] { background: var(--panel-2); color: var(--fg); }
   .controls { display: flex; gap: 8px; flex-wrap: wrap; }
 
-  /* Selected race */
-  .focus { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); gap: 14px; }
-  @media (max-width: 820px) { .focus { grid-template-columns: minmax(0, 1fr); } }
+  .grid2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); gap: 14px; }
+  .grid2.even { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  @media (max-width: 860px) { .grid2, .grid2.even { grid-template-columns: minmax(0, 1fr); } }
   .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; min-width: 0; }
+  .card h2 { margin: 0 0 10px; font-size: 13px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); font-weight: 600; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   .eyebrow { font-size: 12px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
   .pill { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; border-radius: 4px; padding: 2px 7px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
   .pill.fc { color: var(--rain); border-color: color-mix(in srgb, var(--rain) 50%, transparent); }
@@ -64,39 +67,68 @@
   .pill.done { color: var(--fg); background: var(--panel-2); }
   .gp { margin: 6px 0 2px; font-size: clamp(26px, 6vw, 36px); line-height: 1.05; font-weight: 900; text-transform: uppercase; font-style: italic; text-wrap: balance; }
   .where { color: var(--muted); }
-  .count { font-family: var(--mono); font-size: 15px; margin-top: 8px; color: var(--fg); }
+  .count { font-family: var(--mono); font-size: 15px; margin-top: 8px; }
   .temps { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 16px; }
   .temp { background: var(--panel-2); border-radius: 10px; padding: 12px; border-left: 4px solid var(--heat); }
   .temp.trk { border-left-color: var(--track); }
-  .temp .k { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  .k { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
   .temp .v { font-family: var(--mono); font-weight: 700; font-size: clamp(30px, 8vw, 42px); line-height: 1.1; }
   .temp .n { font-size: 12px; color: var(--muted); }
   .facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 10px; }
   .fact { border-top: 1px solid var(--line); padding-top: 8px; }
-  .fact .k { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
   .fact .v { font-family: var(--mono); font-size: 18px; }
   .hours { margin-top: 14px; }
-  .hours h3 { margin: 0 0 6px; font-size: 12px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
   .hours svg { width: 100%; height: auto; display: block; }
-  .note { font-size: 12px; color: var(--muted); margin-top: 12px; }
+  .note { font-size: 12px; color: var(--muted); margin: 12px 0 0; }
 
+  /* Map */
   .mapcard { padding: 0; overflow: hidden; display: flex; flex-direction: column; }
-  #map { height: 420px; width: 100%; background: #0b0f14; }
-  @media (max-width: 820px) { #map { height: 340px; } }
+  .mapbox { position: relative; flex: 1; display: flex; min-height: 460px; }
+  #map { flex: 1; width: 100%; min-height: 460px; background: #0b0f14; }
+  @media (max-width: 860px) { .mapbox, #map { min-height: 380px; } }
+  .mapview { position: absolute; top: 10px; left: 10px; z-index: 2; display: flex; gap: 6px; flex-wrap: wrap; }
+  .mapview button { background: rgba(17, 22, 29, .85); border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; cursor: pointer; font-weight: 600; font-size: 13px; }
+  .mapview button[aria-pressed="true"] { background: var(--fg); color: var(--bg); border-color: var(--fg); }
   .maptools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 12px; border-top: 1px solid var(--line); }
   .chk { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; padding: 4px 10px; border-radius: 999px; background: var(--panel-2); cursor: pointer; user-select: none; }
   .chk input { accent-color: var(--rain); margin: 0; }
+  .chk:has(input:disabled) { opacity: .45; cursor: not-allowed; }
   .stamp { margin-left: auto; font-family: var(--mono); font-size: 12px; color: var(--muted); }
   .playbtn { background: var(--panel-2); border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px; cursor: pointer; font-size: 13px; }
-  .leaflet-container { font-family: var(--display); }
+  .maplibregl-ctrl-attrib { font-size: 10px; }
+  .mk-pin { width: 16px; height: 16px; border-radius: 50%; background: #fff; border: 4px solid var(--track); box-shadow: 0 0 0 2px rgba(0,0,0,.4); }
+  .mk-hit { font: 700 11px var(--mono); background: var(--storm); color: #1b1600; border-radius: 4px; padding: 1px 5px; box-shadow: 0 1px 4px rgba(0,0,0,.5); white-space: nowrap; }
+  .mk-hit.late { background: var(--rain); }
+  .mk-arrow { display: flex; flex-direction: column; align-items: center; gap: 4px; pointer-events: none; }
+  .mk-arrow svg { filter: drop-shadow(0 1px 3px rgba(0,0,0,.7)); }
+  .mk-arrow span { font: 700 11px var(--mono); background: rgba(17,22,29,.85); padding: 2px 6px; border-radius: 4px; white-space: nowrap; }
+
+  /* Storm watch */
+  .eta { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .eta .big { font-family: var(--mono); font-weight: 700; font-size: clamp(26px, 7vw, 36px); color: var(--rain); }
+  .eta .big.dry { color: var(--fg); }
+  .order { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-direction: column; }
+  .order li { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 10px; padding: 7px 0; border-top: 1px solid var(--line); align-items: baseline; }
+  .order li b { font-family: var(--mono); color: var(--storm); }
+  .order li .t { font-family: var(--mono); font-size: 13px; color: var(--muted); white-space: nowrap; }
+
+  /* Strategy */
+  .tyrebar { display: flex; height: 26px; border-radius: 6px; overflow: hidden; margin-top: 4px; border: 1px solid var(--line); }
+  .tyrebar div { display: flex; align-items: center; justify-content: center; font: 700 12px var(--mono); color: #111; min-width: 0; overflow: hidden; }
+  .laps { display: flex; justify-content: space-between; font: 500 11px var(--mono); color: var(--muted); margin-top: 4px; }
+  .calls { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+  .calls li { display: grid; grid-template-columns: 62px minmax(0, 1fr); gap: 10px; align-items: start; }
+  .calls .lap { font: 700 12px var(--mono); color: var(--muted); padding-top: 2px; }
+  .tyre { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; }
+  .tyre i { width: 14px; height: 14px; border-radius: 50%; border: 3px solid currentColor; background: #111; display: inline-block; }
+  .legend { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 12px; font-size: 12px; color: var(--muted); }
 
   /* Season list */
   .list h2 { margin: 0 0 8px; font-size: 14px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
   .rows { display: flex; flex-direction: column; border-top: 1px solid var(--line); }
   .race {
     display: grid; grid-template-columns: 44px minmax(0, 1.6fr) 130px repeat(3, 76px) 120px; gap: 10px; align-items: center;
-    padding: 10px 8px; border-bottom: 1px solid var(--line); cursor: pointer; background: none; border-left: 0; border-right: 0; border-top: 0;
-    text-align: left; width: 100%;
+    padding: 10px 8px; border: 0; border-bottom: 1px solid var(--line); cursor: pointer; background: none; text-align: left; width: 100%;
   }
   .race:hover { background: var(--panel); }
   .race[aria-current="true"] { background: var(--panel); box-shadow: inset 3px 0 0 var(--track); }
@@ -109,21 +141,20 @@
   .race .num.air { color: var(--heat); }
   .race .num.trk { color: var(--track); }
   .race .num.rn { color: var(--rain); }
-  .race .tag { text-align: right; }
+  .race .tag { text-align: right; display: flex; gap: 4px; justify-content: flex-end; flex-wrap: wrap; }
   .head { cursor: default; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); padding-block: 8px; }
   .head:hover { background: none; }
   .head span { text-align: right; }
   .head span:nth-child(-n+3) { text-align: left; }
   @media (max-width: 720px) {
-    .race { grid-template-columns: 34px minmax(0, 1fr) 62px 62px; row-gap: 2px; }
+    .race { grid-template-columns: 34px minmax(0, 1fr) 56px 56px; row-gap: 2px; }
     .race .dt { grid-column: 2; grid-row: 2; color: var(--muted); }
-    .race .num.rn, .race .head-rn { display: none; }
+    .race .num.rn, .head .head-rn, .head .h-dt, .head .h-tag { display: none; }
     .race .tag { grid-column: 3 / span 2; grid-row: 2; }
-    .head .h-dt, .head .h-tag { display: none; }
   }
   footer { font-size: 12px; color: var(--muted); line-height: 1.6; }
   footer a { color: var(--rain); }
-  @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+  footer p { margin: 0 0 8px; }
 </style>
 </head>
 <body>
@@ -142,7 +173,7 @@
     </div>
   </header>
 
-  <section class="focus" aria-live="polite">
+  <section class="grid2" aria-live="polite">
     <div class="card" id="detail">
       <div class="eyebrow"><span id="d-round">–</span><span id="d-src" class="pill">Loading</span><span id="d-storm" class="pill storm" hidden>Storm risk</span></div>
       <div class="gp" id="d-name">–</div>
@@ -158,20 +189,52 @@
         <div class="fact"><div class="k">Sky</div><div class="v" id="d-sky">–</div></div>
       </div>
       <div class="hours" id="d-hours" hidden>
-        <h3>Race window, local time</h3>
+        <div class="k" style="margin-bottom:6px">Race window, local time</div>
         <svg id="d-chart" viewBox="0 0 320 120" role="img" aria-label="Air and track temperature through the race window"></svg>
       </div>
       <p class="note" id="d-note"></p>
     </div>
     <div class="card mapcard">
-      <div id="map" role="region" aria-label="Satellite and radar map around the circuit"></div>
+      <div class="mapbox">
+        <div id="map" role="region" aria-label="Satellite, radar and 3D terrain map of the circuit"></div>
+        <div class="mapview">
+          <button type="button" id="v-track" aria-pressed="true">Track</button>
+          <button type="button" id="v-region" aria-pressed="false">Region</button>
+          <button type="button" id="v-3d" aria-pressed="false">3D</button>
+        </div>
+      </div>
       <div class="maptools">
-        <label class="chk"><input type="checkbox" id="lyr-ir" checked> Storm clouds (infrared)</label>
+        <label class="chk"><input type="checkbox" id="lyr-ir" checked> Storm clouds</label>
         <label class="chk"><input type="checkbox" id="lyr-radar" checked> Rain radar</label>
         <label class="chk"><input type="checkbox" id="lyr-true"> Daylight satellite</label>
         <button type="button" class="playbtn" id="play">Play last 2 h</button>
         <span class="stamp" id="stamp">–</span>
       </div>
+    </div>
+  </section>
+
+  <section class="grid2 even">
+    <div class="card" id="storm">
+      <h2>Storm watch <span class="pill" id="sw-src">Live</span></h2>
+      <div class="eta"><span class="big" id="sw-eta">–</span><span id="sw-sub" class="where"></span></div>
+      <p class="note" id="sw-motion"></p>
+      <ol class="order" id="sw-order"></ol>
+      <p class="note" id="sw-note"></p>
+    </div>
+    <div class="card" id="strategy">
+      <h2>Tyre strategy <span class="pill" id="st-src">–</span></h2>
+      <div id="st-head" class="where"></div>
+      <div class="tyrebar" id="st-bar"></div>
+      <div class="laps"><span>Lap 1</span><span id="st-mid"></span><span id="st-end"></span></div>
+      <ul class="calls" id="st-calls"></ul>
+      <div class="legend">
+        <span class="tyre" style="color:var(--soft)"><i></i>Soft</span>
+        <span class="tyre" style="color:var(--medium)"><i></i>Medium</span>
+        <span class="tyre" style="color:var(--hard)"><i></i>Hard</span>
+        <span class="tyre" style="color:var(--inter)"><i></i>Intermediate</span>
+        <span class="tyre" style="color:var(--wet)"><i></i>Full wet</span>
+      </div>
+      <p class="note">A game plan worked out from the weather, for fun. Real teams also weigh tyre wear data, gaps, safety cars and the rules on that weekend.</p>
     </div>
   </section>
 
@@ -181,50 +244,52 @@
   </section>
 
   <footer>
-    <p><b>How the numbers work.</b> Races within 16 days use the hourly forecast for the scheduled start. Races further out show what the weather was on the same date over the last three years at the same hour, so treat them as typical conditions, not a forecast; they switch to the forecast automatically once it is available. Nobody publishes track temperature in advance, so it is estimated from air temperature and sunshine: track ≈ air + 2 °C + 0.024 °C per W/m² of sunlight. In full sun that puts the asphalt about 20–25 °C above the air, and at night races only a couple of degrees above.</p>
-    <p><b>The map</b> shows the latest infrared cloud imagery (cold, tall storm tops show brightest), rain radar where countries publish it, and yesterday's daylight satellite photo. It is live now, so it shows storms approaching the circuit today, not on race day.</p>
-    <p>Calendar as published in September 2026; Turkey is provisional, and 2027 start times are not out yet, so usual local start times are used. Check <a href="https://www.formula1.com/en/racing/2027" target="_blank" rel="noopener">formula1.com</a> for changes. Weather: <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a>. Radar and infrared: <a href="https://www.rainviewer.com/" target="_blank" rel="noopener">RainViewer</a>. Satellite photo: NASA GIBS. Base imagery: Esri.</p>
+    <p><b>Forecasts.</b> Races within 16 days use the hourly forecast for the scheduled start. Races further out show what the weather was on the same date over the last three years at the same hour, labelled Typical; they switch to the forecast once it is available.</p>
+    <p><b>Track temperature</b> isn't published in advance, so it is estimated from air temperature and sunshine: track ≈ air + 2 °C + 0.024 °C per W/m² of sunlight. In full sun that puts the asphalt about 20–25 °C above the air; at night races only a couple of degrees.</p>
+    <p><b>Storm watch</b> uses a 15-minute rain forecast for the circuit to time when rain arrives, and the wind about 3 km up (the wind that steers storm cells) for which way it is moving. The rain front is assumed to sweep across the circuit in that direction, so the corners on the upwind side get wet first. Corners are found from the track outline and named by how far into the lap they are, because the outline doesn't carry official turn numbers.</p>
+    <p><b>Map:</b> Esri satellite imagery with 3D terrain from AWS elevation tiles, live rain radar and infrared storm clouds from <a href="https://www.rainviewer.com/" target="_blank" rel="noopener">RainViewer</a>, and yesterday's daylight satellite photo from NASA GIBS. Weather: <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a>. Track outlines: <a href="https://github.com/bacinger/f1-circuits" target="_blank" rel="noopener">bacinger/f1-circuits</a> (MIT).</p>
+    <p>Calendar as published in September 2026. Turkey is provisional, and 2027 start times are not out yet, so usual local start times are used. Check <a href="https://www.formula1.com/en/racing/2027" target="_blank" rel="noopener">formula1.com</a> for changes.</p>
   </footer>
 </div>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
 <script>
-// Calendar. date = race day (local), start = usual local start time.
+// Calendar. date = race day (local), start = usual local start, trk = outline id, laps, lap = typical race lap in seconds.
 const RACES = [
-  { y: 2026, r: 20, gp: "Mexico City Grand Prix", c: "Autódromo Hermanos Rodríguez", city: "Mexico City, Mexico", date: "2026-11-01", start: "14:00", lat: 19.4042, lon: -99.0907, tz: "America/Mexico_City" },
-  { y: 2026, r: 21, gp: "São Paulo Grand Prix", c: "Interlagos", city: "São Paulo, Brazil", date: "2026-11-08", start: "14:00", lat: -23.7036, lon: -46.6997, tz: "America/Sao_Paulo" },
-  { y: 2026, r: 22, gp: "Las Vegas Grand Prix", c: "Las Vegas Strip Circuit", city: "Las Vegas, USA", date: "2026-11-21", start: "20:00", lat: 36.1147, lon: -115.1728, tz: "America/Los_Angeles", night: true },
-  { y: 2026, r: 23, gp: "Qatar Grand Prix", c: "Lusail International Circuit", city: "Lusail, Qatar", date: "2026-11-29", start: "19:00", lat: 25.49, lon: 51.4542, tz: "Asia/Qatar", night: true },
-  { y: 2026, r: 24, gp: "Abu Dhabi Grand Prix", c: "Yas Marina Circuit", city: "Abu Dhabi, UAE", date: "2026-12-06", start: "17:00", lat: 24.4672, lon: 54.6031, tz: "Asia/Dubai" },
+  { y: 2026, r: 20, gp: "Mexico City Grand Prix", c: "Autódromo Hermanos Rodríguez", city: "Mexico City, Mexico", date: "2026-11-01", start: "14:00", lat: 19.4042, lon: -99.0907, tz: "America/Mexico_City", trk: "mx-1962", laps: 71, lap: 81 },
+  { y: 2026, r: 21, gp: "São Paulo Grand Prix", c: "Interlagos", city: "São Paulo, Brazil", date: "2026-11-08", start: "14:00", lat: -23.7036, lon: -46.6997, tz: "America/Sao_Paulo", trk: "br-1940", laps: 71, lap: 74 },
+  { y: 2026, r: 22, gp: "Las Vegas Grand Prix", c: "Las Vegas Strip Circuit", city: "Las Vegas, USA", date: "2026-11-21", start: "20:00", lat: 36.1147, lon: -115.1728, tz: "America/Los_Angeles", night: true, trk: "us-2023", laps: 50, lap: 96 },
+  { y: 2026, r: 23, gp: "Qatar Grand Prix", c: "Lusail International Circuit", city: "Lusail, Qatar", date: "2026-11-29", start: "19:00", lat: 25.49, lon: 51.4542, tz: "Asia/Qatar", night: true, trk: "qa-2004", laps: 57, lap: 86 },
+  { y: 2026, r: 24, gp: "Abu Dhabi Grand Prix", c: "Yas Marina Circuit", city: "Abu Dhabi, UAE", date: "2026-12-06", start: "17:00", lat: 24.4672, lon: 54.6031, tz: "Asia/Dubai", trk: "ae-2009", laps: 58, lap: 89 },
 
-  { y: 2027, r: 1, gp: "Bahrain Grand Prix", c: "Bahrain International Circuit", city: "Sakhir, Bahrain", date: "2027-03-14", start: "18:00", lat: 26.0325, lon: 50.5106, tz: "Asia/Bahrain", night: true },
-  { y: 2027, r: 2, gp: "Saudi Arabian Grand Prix", c: "Jeddah Corniche Circuit", city: "Jeddah, Saudi Arabia", date: "2027-03-21", start: "20:00", lat: 21.6319, lon: 39.1044, tz: "Asia/Riyadh", night: true },
-  { y: 2027, r: 3, gp: "Australian Grand Prix", c: "Albert Park", city: "Melbourne, Australia", date: "2027-04-04", start: "15:00", lat: -37.8497, lon: 144.968, tz: "Australia/Melbourne" },
-  { y: 2027, r: 4, gp: "Japanese Grand Prix", c: "Suzuka", city: "Suzuka, Japan", date: "2027-04-11", start: "14:00", lat: 34.8431, lon: 136.541, tz: "Asia/Tokyo" },
-  { y: 2027, r: 5, gp: "Chinese Grand Prix", c: "Shanghai International Circuit", city: "Shanghai, China", date: "2027-04-18", start: "15:00", lat: 31.3389, lon: 121.22, tz: "Asia/Shanghai" },
-  { y: 2027, r: 6, gp: "Miami Grand Prix", c: "Miami International Autodrome", city: "Miami, USA", date: "2027-05-02", start: "16:00", lat: 25.9581, lon: -80.2389, tz: "America/New_York" },
-  { y: 2027, r: 7, gp: "Canadian Grand Prix", c: "Circuit Gilles Villeneuve", city: "Montréal, Canada", date: "2027-05-23", start: "14:00", lat: 45.5, lon: -73.5228, tz: "America/Toronto" },
-  { y: 2027, r: 8, gp: "Monaco Grand Prix", c: "Circuit de Monaco", city: "Monte Carlo, Monaco", date: "2027-06-06", start: "15:00", lat: 43.7347, lon: 7.4206, tz: "Europe/Monaco" },
-  { y: 2027, r: 9, gp: "Portuguese Grand Prix", c: "Algarve International Circuit", city: "Portimão, Portugal", date: "2027-06-20", start: "15:00", lat: 37.227, lon: -8.6267, tz: "Europe/Lisbon" },
-  { y: 2027, r: 10, gp: "British Grand Prix", c: "Silverstone", city: "Silverstone, UK", date: "2027-07-04", start: "15:00", lat: 52.0786, lon: -1.0169, tz: "Europe/London" },
-  { y: 2027, r: 11, gp: "Austrian Grand Prix", c: "Red Bull Ring", city: "Spielberg, Austria", date: "2027-07-11", start: "15:00", lat: 47.2197, lon: 14.7647, tz: "Europe/Vienna" },
-  { y: 2027, r: 12, gp: "Belgian Grand Prix", c: "Spa-Francorchamps", city: "Stavelot, Belgium", date: "2027-07-25", start: "15:00", lat: 50.4372, lon: 5.9714, tz: "Europe/Brussels" },
-  { y: 2027, r: 13, gp: "Hungarian Grand Prix", c: "Hungaroring", city: "Mogyoród, Hungary", date: "2027-08-01", start: "15:00", lat: 47.5789, lon: 19.2486, tz: "Europe/Budapest" },
-  { y: 2027, r: 14, gp: "Italian Grand Prix", c: "Monza", city: "Monza, Italy", date: "2027-09-05", start: "15:00", lat: 45.6156, lon: 9.2811, tz: "Europe/Rome" },
-  { y: 2027, r: 15, gp: "Spanish Grand Prix", c: "Madring", city: "Madrid, Spain", date: "2027-09-12", start: "15:00", lat: 40.4637, lon: -3.6158, tz: "Europe/Madrid" },
-  { y: 2027, r: 16, gp: "Azerbaijan Grand Prix", c: "Baku City Circuit", city: "Baku, Azerbaijan", date: "2027-09-26", start: "15:00", lat: 40.3725, lon: 49.8533, tz: "Asia/Baku" },
-  { y: 2027, r: 17, gp: "Turkish Grand Prix", c: "Istanbul Park", city: "Istanbul, Türkiye", date: "2027-10-03", start: "15:00", lat: 40.9517, lon: 29.405, tz: "Europe/Istanbul", provisional: true },
-  { y: 2027, r: 18, gp: "Singapore Grand Prix", c: "Marina Bay Street Circuit", city: "Singapore", date: "2027-10-10", start: "20:00", lat: 1.2914, lon: 103.864, tz: "Asia/Singapore", night: true },
-  { y: 2027, r: 19, gp: "United States Grand Prix", c: "Circuit of the Americas", city: "Austin, USA", date: "2027-10-24", start: "14:00", lat: 30.1328, lon: -97.6411, tz: "America/Chicago" },
-  { y: 2027, r: 20, gp: "Mexico City Grand Prix", c: "Autódromo Hermanos Rodríguez", city: "Mexico City, Mexico", date: "2027-10-31", start: "14:00", lat: 19.4042, lon: -99.0907, tz: "America/Mexico_City" },
-  { y: 2027, r: 21, gp: "São Paulo Grand Prix", c: "Interlagos", city: "São Paulo, Brazil", date: "2027-11-07", start: "14:00", lat: -23.7036, lon: -46.6997, tz: "America/Sao_Paulo" },
-  { y: 2027, r: 22, gp: "Las Vegas Grand Prix", c: "Las Vegas Strip Circuit", city: "Las Vegas, USA", date: "2027-11-20", start: "20:00", lat: 36.1147, lon: -115.1728, tz: "America/Los_Angeles", night: true },
-  { y: 2027, r: 23, gp: "Qatar Grand Prix", c: "Lusail International Circuit", city: "Lusail, Qatar", date: "2027-12-05", start: "19:00", lat: 25.49, lon: 51.4542, tz: "Asia/Qatar", night: true },
-  { y: 2027, r: 24, gp: "Abu Dhabi Grand Prix", c: "Yas Marina Circuit", city: "Abu Dhabi, UAE", date: "2027-12-12", start: "17:00", lat: 24.4672, lon: 54.6031, tz: "Asia/Dubai" },
+  { y: 2027, r: 1, gp: "Bahrain Grand Prix", c: "Bahrain International Circuit", city: "Sakhir, Bahrain", date: "2027-03-14", start: "18:00", lat: 26.0325, lon: 50.5106, tz: "Asia/Bahrain", night: true, trk: "bh-2002", laps: 57, lap: 96 },
+  { y: 2027, r: 2, gp: "Saudi Arabian Grand Prix", c: "Jeddah Corniche Circuit", city: "Jeddah, Saudi Arabia", date: "2027-03-21", start: "20:00", lat: 21.6319, lon: 39.1044, tz: "Asia/Riyadh", night: true, trk: "sa-2021", laps: 50, lap: 93 },
+  { y: 2027, r: 3, gp: "Australian Grand Prix", c: "Albert Park", city: "Melbourne, Australia", date: "2027-04-04", start: "15:00", lat: -37.8497, lon: 144.968, tz: "Australia/Melbourne", trk: "au-1953", laps: 58, lap: 82 },
+  { y: 2027, r: 4, gp: "Japanese Grand Prix", c: "Suzuka", city: "Suzuka, Japan", date: "2027-04-11", start: "14:00", lat: 34.8431, lon: 136.541, tz: "Asia/Tokyo", trk: "jp-1962", laps: 53, lap: 94 },
+  { y: 2027, r: 5, gp: "Chinese Grand Prix", c: "Shanghai International Circuit", city: "Shanghai, China", date: "2027-04-18", start: "15:00", lat: 31.3389, lon: 121.22, tz: "Asia/Shanghai", trk: "cn-2004", laps: 56, lap: 97 },
+  { y: 2027, r: 6, gp: "Miami Grand Prix", c: "Miami International Autodrome", city: "Miami, USA", date: "2027-05-02", start: "16:00", lat: 25.9581, lon: -80.2389, tz: "America/New_York", trk: "us-2022", laps: 57, lap: 91 },
+  { y: 2027, r: 7, gp: "Canadian Grand Prix", c: "Circuit Gilles Villeneuve", city: "Montréal, Canada", date: "2027-05-23", start: "14:00", lat: 45.5, lon: -73.5228, tz: "America/Toronto", trk: "ca-1978", laps: 70, lap: 76 },
+  { y: 2027, r: 8, gp: "Monaco Grand Prix", c: "Circuit de Monaco", city: "Monte Carlo, Monaco", date: "2027-06-06", start: "15:00", lat: 43.7347, lon: 7.4206, tz: "Europe/Monaco", trk: "mc-1929", laps: 78, lap: 76 },
+  { y: 2027, r: 9, gp: "Portuguese Grand Prix", c: "Algarve International Circuit", city: "Portimão, Portugal", date: "2027-06-20", start: "15:00", lat: 37.227, lon: -8.6267, tz: "Europe/Lisbon", trk: "pt-2008", laps: 66, lap: 82 },
+  { y: 2027, r: 10, gp: "British Grand Prix", c: "Silverstone", city: "Silverstone, UK", date: "2027-07-04", start: "15:00", lat: 52.0786, lon: -1.0169, tz: "Europe/London", trk: "gb-1948", laps: 52, lap: 91 },
+  { y: 2027, r: 11, gp: "Austrian Grand Prix", c: "Red Bull Ring", city: "Spielberg, Austria", date: "2027-07-11", start: "15:00", lat: 47.2197, lon: 14.7647, tz: "Europe/Vienna", trk: "at-1969", laps: 71, lap: 68 },
+  { y: 2027, r: 12, gp: "Belgian Grand Prix", c: "Spa-Francorchamps", city: "Stavelot, Belgium", date: "2027-07-25", start: "15:00", lat: 50.4372, lon: 5.9714, tz: "Europe/Brussels", trk: "be-1925", laps: 44, lap: 108 },
+  { y: 2027, r: 13, gp: "Hungarian Grand Prix", c: "Hungaroring", city: "Mogyoród, Hungary", date: "2027-08-01", start: "15:00", lat: 47.5789, lon: 19.2486, tz: "Europe/Budapest", trk: "hu-1986", laps: 70, lap: 81 },
+  { y: 2027, r: 14, gp: "Italian Grand Prix", c: "Monza", city: "Monza, Italy", date: "2027-09-05", start: "15:00", lat: 45.6156, lon: 9.2811, tz: "Europe/Rome", trk: "it-1922", laps: 53, lap: 84 },
+  { y: 2027, r: 15, gp: "Spanish Grand Prix", c: "Madring", city: "Madrid, Spain", date: "2027-09-12", start: "15:00", lat: 40.4637, lon: -3.6158, tz: "Europe/Madrid", trk: "es-2026", laps: 57, lap: 95 },
+  { y: 2027, r: 16, gp: "Azerbaijan Grand Prix", c: "Baku City Circuit", city: "Baku, Azerbaijan", date: "2027-09-26", start: "15:00", lat: 40.3725, lon: 49.8533, tz: "Asia/Baku", trk: "az-2016", laps: 51, lap: 106 },
+  { y: 2027, r: 17, gp: "Turkish Grand Prix", c: "Istanbul Park", city: "Istanbul, Türkiye", date: "2027-10-03", start: "15:00", lat: 40.9517, lon: 29.405, tz: "Europe/Istanbul", provisional: true, trk: "tr-2005", laps: 58, lap: 90 },
+  { y: 2027, r: 18, gp: "Singapore Grand Prix", c: "Marina Bay Street Circuit", city: "Singapore", date: "2027-10-10", start: "20:00", lat: 1.2914, lon: 103.864, tz: "Asia/Singapore", night: true, trk: "sg-2008", laps: 62, lap: 96 },
+  { y: 2027, r: 19, gp: "United States Grand Prix", c: "Circuit of the Americas", city: "Austin, USA", date: "2027-10-24", start: "14:00", lat: 30.1328, lon: -97.6411, tz: "America/Chicago", trk: "us-2012", laps: 56, lap: 99 },
+  { y: 2027, r: 20, gp: "Mexico City Grand Prix", c: "Autódromo Hermanos Rodríguez", city: "Mexico City, Mexico", date: "2027-10-31", start: "14:00", lat: 19.4042, lon: -99.0907, tz: "America/Mexico_City", trk: "mx-1962", laps: 71, lap: 81 },
+  { y: 2027, r: 21, gp: "São Paulo Grand Prix", c: "Interlagos", city: "São Paulo, Brazil", date: "2027-11-07", start: "14:00", lat: -23.7036, lon: -46.6997, tz: "America/Sao_Paulo", trk: "br-1940", laps: 71, lap: 74 },
+  { y: 2027, r: 22, gp: "Las Vegas Grand Prix", c: "Las Vegas Strip Circuit", city: "Las Vegas, USA", date: "2027-11-20", start: "20:00", lat: 36.1147, lon: -115.1728, tz: "America/Los_Angeles", night: true, trk: "us-2023", laps: 50, lap: 96 },
+  { y: 2027, r: 23, gp: "Qatar Grand Prix", c: "Lusail International Circuit", city: "Lusail, Qatar", date: "2027-12-05", start: "19:00", lat: 25.49, lon: 51.4542, tz: "Asia/Qatar", night: true, trk: "qa-2004", laps: 57, lap: 86 },
+  { y: 2027, r: 24, gp: "Abu Dhabi Grand Prix", c: "Yas Marina Circuit", city: "Abu Dhabi, UAE", date: "2027-12-12", start: "17:00", lat: 24.4672, lon: 54.6031, tz: "Asia/Dubai", trk: "ae-2009", laps: 58, lap: 89 },
 ];
-const FORECAST_DAYS = 16, RACE_HOURS = 2, YEARS_BACK = 3;
+const FORECAST_DAYS = 16, YEARS_BACK = 3, NOW_HOURS = 48;
 
-// ---------- small helpers ----------
+// ---------- helpers ----------
 const $ = id => document.getElementById(id);
 const store = {
   get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } },
@@ -233,7 +298,6 @@ const store = {
 let unit = store.get("unit") || "F";
 let season = store.get("season") || 2026;
 
-// Convert a wall-clock time in an IANA zone to a UTC Date.
 function zonedToUtc(date, time, tz) {
   const guess = Date.parse(`${date}T${time}:00Z`);
   const offsetAt = t => {
@@ -246,15 +310,25 @@ function zonedToUtc(date, time, tz) {
   t = guess - offsetAt(t);
   return new Date(t);
 }
-RACES.forEach(r => { r.id = `${r.y}-${r.r}`; r.utc = zonedToUtc(r.date, r.start, r.tz); r.end = new Date(r.utc.getTime() + RACE_HOURS * 3600e3); });
+RACES.forEach(r => {
+  r.id = `${r.y}-${r.r}`;
+  r.utc = zonedToUtc(r.date, r.start, r.tz);
+  r.hours = r.laps * r.lap / 3600;
+  r.end = new Date(r.utc.getTime() + r.hours * 3600e3);
+});
 
 const toUnit = c => unit === "F" ? c * 9 / 5 + 32 : c;
 const fmtT = c => c == null || isNaN(c) ? "–" : `${Math.round(toUnit(c))}°`;
 const fmtWind = k => k == null ? "–" : unit === "F" ? `${Math.round(k * 0.621)} mph` : `${Math.round(k)} km/h`;
+const fmtKm = m => unit === "F" ? `${(m / 1609).toFixed(1)} mi` : `${(m / 1000).toFixed(1)} km`;
 const trackFrom = (air, sw) => air + 2 + 0.024 * Math.max(0, sw || 0);
 const shortDate = r => new Date(`${r.date}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
 const weekday = r => new Date(`${r.date}T12:00:00Z`).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
+const localTime = (d, tz) => d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: tz });
+const localDay = (d, tz) => d.toLocaleDateString("en-US", { weekday: "short", timeZone: tz });
 const isStorm = code => code >= 95;
+const COMPASS = ["north", "north-east", "east", "south-east", "south", "south-west", "west", "north-west"];
+const compass = deg => COMPASS[Math.round(((deg % 360) + 360) % 360 / 45) % 8];
 function sky(code, cloud) {
   if (code == null) return cloud == null ? "–" : cloud > 70 ? "Cloudy" : cloud > 30 ? "Partly" : "Clear";
   if (code >= 95) return "Storms";
@@ -267,26 +341,34 @@ function sky(code, cloud) {
   return "Clear";
 }
 const hourKey = (date, h) => `${date}T${String(h).padStart(2, "0")}:00`;
-
-// ---------- weather loading ----------
-const weather = {}; // id -> { kind: 'forecast'|'typical', air, track, rain, wind, cloud, code, storm, series:[{h,air,track}] , years }
-const HOURLY = "temperature_2m,shortwave_radiation,precipitation_probability,precipitation,weather_code,wind_speed_10m,cloud_cover";
-
 async function getJSON(url) {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }
 
-function inForecastRange(r) {
-  const days = (r.utc - Date.now()) / 86400e3;
-  return days < FORECAST_DAYS - 1;
+// ---------- track outlines ----------
+let TRACKS = {};
+const tracksReady = fetch("tracks.json").then(r => r.json()).then(j => { TRACKS = j; }).catch(() => {});
+// metres east/north of a reference point
+function toXY(ll, ref) {
+  const R = 6371000, k = Math.PI / 180;
+  return [(ll[0] - ref[0]) * k * R * Math.cos(ref[1] * k), (ll[1] - ref[1]) * k * R];
+}
+function centroid(line) {
+  const s = line.reduce((a, p) => [a[0] + p[0], a[1] + p[1]], [0, 0]);
+  return [s[0] / line.length, s[1] / line.length];
 }
 
-function pickWindow(h, date, startHour) {
-  // returns indices for start-1 .. start+RACE_HOURS+1
+// ---------- weather ----------
+const weather = {};
+const nowcast = {};
+const HOURLY = "temperature_2m,shortwave_radiation,precipitation_probability,precipitation,weather_code,wind_speed_10m,cloud_cover";
+const inForecastRange = r => (r.utc - Date.now()) / 86400e3 < FORECAST_DAYS - 1;
+
+function pickWindow(h, date, startHour, hours) {
   const out = [];
-  for (let k = startHour - 1; k <= startHour + RACE_HOURS + 1; k++) {
+  for (let k = startHour - 1; k <= startHour + Math.ceil(hours) + 1; k++) {
     let d = date, hh = k;
     if (hh >= 24) { d = new Date(Date.parse(date + "T00:00Z") + 86400e3).toISOString().slice(0, 10); hh -= 24; }
     const i = h.time.indexOf(hourKey(d, hh));
@@ -296,37 +378,32 @@ function pickWindow(h, date, startHour) {
 }
 
 async function loadForecast(r) {
-  const cacheKey = `fc:${r.id}`;
-  const cached = store.get(cacheKey);
+  const key = `fc3:${r.id}`, cached = store.get(key);
   if (cached && Date.now() - cached.at < 30 * 60e3) return cached.data;
   const j = await getJSON(`https://api.open-meteo.com/v1/forecast?latitude=${r.lat}&longitude=${r.lon}&hourly=${HOURLY}&timezone=auto&forecast_days=${FORECAST_DAYS}&wind_speed_unit=kmh`);
   const h = j.hourly, sh = +r.start.slice(0, 2);
-  const win = pickWindow(h, r.date, sh);
+  const win = pickWindow(h, r.date, sh, r.hours);
   const at = win.find(w => w.h === sh);
   if (!at) return null;
-  const i = at.i;
-  const race = win.filter(w => w.h >= sh && w.h <= sh + RACE_HOURS);
+  const i = at.i, race = win.filter(w => w.h >= sh && w.h <= sh + Math.ceil(r.hours));
   const data = {
     kind: "forecast",
-    air: h.temperature_2m[i],
-    track: trackFrom(h.temperature_2m[i], h.shortwave_radiation[i]),
+    air: h.temperature_2m[i], track: trackFrom(h.temperature_2m[i], h.shortwave_radiation[i]),
     rain: Math.max(...race.map(w => h.precipitation_probability[w.i] ?? 0)),
     wind: h.wind_speed_10m[i], cloud: h.cloud_cover[i], code: h.weather_code[i],
     storm: race.some(w => isStorm(h.weather_code[w.i])),
-    series: win.map(w => ({ h: w.h, air: h.temperature_2m[w.i], track: trackFrom(h.temperature_2m[w.i], h.shortwave_radiation[w.i]) })),
+    series: win.map(w => ({ h: w.h, air: h.temperature_2m[w.i], track: trackFrom(h.temperature_2m[w.i], h.shortwave_radiation[w.i]),
+      p: h.precipitation[w.i] || 0, prob: h.precipitation_probability[w.i] ?? 0, sw: h.shortwave_radiation[w.i] || 0, code: h.weather_code[w.i] })),
   };
-  store.set(cacheKey, { at: Date.now(), data });
+  store.set(key, { at: Date.now(), data });
   return data;
 }
 
 async function loadTypical(r) {
-  const cacheKey = `ty2:${r.id}`;
-  const cached = store.get(cacheKey);
+  const key = `ty3:${r.id}`, cached = store.get(key);
   if (cached) return cached;
   const [Y, M, D] = r.date.split("-").map(Number);
-  const sh = +r.start.slice(0, 2);
-  const cutoff = Date.now() - 6 * 86400e3;
-  const years = [];
+  const sh = +r.start.slice(0, 2), cutoff = Date.now() - 6 * 86400e3, years = [];
   for (let yy = Y - 1; years.length < YEARS_BACK && yy > Y - 8; yy--) {
     const d = `${yy}-${String(M).padStart(2, "0")}-${String(D).padStart(2, "0")}`;
     if (Date.parse(d + "T00:00Z") + 2 * 86400e3 < cutoff) years.push(d);
@@ -334,51 +411,176 @@ async function loadTypical(r) {
   const rows = await Promise.all(years.map(async d => {
     const next = new Date(Date.parse(d + "T00:00Z") + 86400e3).toISOString().slice(0, 10);
     const j = await getJSON(`https://archive-api.open-meteo.com/v1/archive?latitude=${r.lat}&longitude=${r.lon}&start_date=${d}&end_date=${next}&hourly=temperature_2m,shortwave_radiation,precipitation,wind_speed_10m,cloud_cover,weather_code&timezone=auto&wind_speed_unit=kmh`);
-    const h = j.hourly, win = pickWindow(h, d, sh);
-    const at = win.find(w => w.h === sh);
+    const h = j.hourly, win = pickWindow(h, d, sh, r.hours), at = win.find(w => w.h === sh);
     if (!at) return null;
-    const race = win.filter(w => w.h >= sh && w.h <= sh + RACE_HOURS);
+    const race = win.filter(w => w.h >= sh && w.h <= sh + Math.ceil(r.hours));
     return {
       air: h.temperature_2m[at.i], sw: h.shortwave_radiation[at.i], wind: h.wind_speed_10m[at.i], cloud: h.cloud_cover[at.i],
-      wet: race.some(w => (h.precipitation[w.i] || 0) >= 0.2),
-      storm: race.some(w => isStorm(h.weather_code[w.i])),
+      wet: race.some(w => (h.precipitation[w.i] || 0) >= 0.2), storm: race.some(w => isStorm(h.weather_code[w.i])),
       series: win.map(w => ({ h: w.h, air: h.temperature_2m[w.i], sw: h.shortwave_radiation[w.i] })),
     };
   }));
   const ok = rows.filter(Boolean);
   if (!ok.length) return null;
   const avg = f => ok.reduce((s, x) => s + (f(x) ?? 0), 0) / ok.length;
-  const hoursList = ok[0].series.map(s => s.h);
   const data = {
     kind: "typical", years: ok.length, wetYears: ok.filter(x => x.wet).length, stormYears: ok.filter(x => x.storm).length,
     air: avg(x => x.air), track: trackFrom(avg(x => x.air), avg(x => x.sw)),
     rain: Math.round(100 * ok.filter(x => x.wet).length / ok.length),
     wind: avg(x => x.wind), cloud: avg(x => x.cloud), code: null, storm: false,
-    series: hoursList.map(hh => {
+    series: ok[0].series.map(s => s.h).map(hh => {
       const pts = ok.map(x => x.series.find(s => s.h === hh)).filter(Boolean);
       const a = pts.reduce((s, p) => s + p.air, 0) / pts.length, sw = pts.reduce((s, p) => s + (p.sw || 0), 0) / pts.length;
       return { h: hh, air: a, track: trackFrom(a, sw) };
     }),
   };
-  store.set(cacheKey, data);
+  store.set(key, data);
   return data;
 }
 
 async function loadRace(r, force) {
   if (weather[r.id] && !force) return weather[r.id];
-  try {
-    weather[r.id] = inForecastRange(r) ? await loadForecast(r) || await loadTypical(r) : await loadTypical(r);
-  } catch (e) {
-    weather[r.id] = { error: e.message || "unavailable" };
-  }
+  try { weather[r.id] = inForecastRange(r) ? await loadForecast(r) || await loadTypical(r) : await loadTypical(r); }
+  catch (e) { weather[r.id] = { error: e.message || "unavailable" }; }
   return weather[r.id];
 }
 
-// Throttled queue so 24 races don't fire at once.
-async function loadAll(list) {
-  const queue = list.slice();
-  const worker = async () => { while (queue.length) { const r = queue.shift(); await loadRace(r); renderRow(r); if (r === selected) renderDetail(); } };
-  await Promise.all([worker(), worker(), worker()]);
+// Next 48 h at the circuit in 15-minute steps, plus the steering wind (700 hPa, about 3 km up).
+async function loadNow(r, force) {
+  const key = `${r.lat},${r.lon}`;
+  if (nowcast[key] && !force && Date.now() - nowcast[key].at < 15 * 60e3) return nowcast[key];
+  try {
+    const j = await getJSON(`https://api.open-meteo.com/v1/forecast?latitude=${r.lat}&longitude=${r.lon}&minutely_15=precipitation&forecast_minutely_15=${NOW_HOURS * 4}&hourly=wind_speed_700hPa,wind_direction_700hPa,weather_code,cape&forecast_days=3&timezone=GMT&wind_speed_unit=kmh`);
+    const m = j.minutely_15, h = j.hourly;
+    nowcast[key] = {
+      at: Date.now(),
+      steps: m.time.map((t, i) => ({ t: Date.parse(t + "Z"), mmh: (m.precipitation[i] || 0) * 4 })),
+      hours: h.time.map((t, i) => ({ t: Date.parse(t + "Z"), ws: h.wind_speed_700hPa[i], wd: h.wind_direction_700hPa[i], code: h.weather_code[i], cape: h.cape[i] })),
+    };
+  } catch (e) { nowcast[key] = { at: Date.now(), error: e.message || "unavailable" }; }
+  return nowcast[key];
+}
+const hourAt = (nc, t) => nc.hours.reduce((best, x) => Math.abs(x.t - t) < Math.abs(best.t - t) ? x : best, nc.hours[0]);
+
+// ---------- storm projection over the track ----------
+function projectStorm(r, nc) {
+  const trk = TRACKS[r.trk];
+  if (!nc || nc.error || !nc.steps.length) return null;
+  const now = Date.now(), steps = nc.steps.filter(s => s.t + 15 * 60e3 > now);
+  const firstWet = steps.find(s => s.mmh >= 0.4);
+  if (!firstWet) return { dry: true, until: steps.length ? steps.at(-1).t : now };
+  let end = steps.findIndex((s, i) => s.t > firstWet.t && s.mmh < 0.2 && (steps[i + 1]?.mmh ?? 0) < 0.2);
+  const wetSpan = steps.filter(s => s.t >= firstWet.t && (end < 0 || s.t < steps[end].t));
+  const peak = Math.max(...wetSpan.map(s => s.mmh));
+  const hr = hourAt(nc, firstWet.t);
+  const towards = (hr.wd + 180) % 360, speedKmh = hr.ws || 0;
+  const thunder = wetSpan.some(s => { const x = hourAt(nc, s.t); return isStorm(x.code) || (x.cape > 1000 && s.mmh > 4); });
+  const res = { dry: false, start: firstWet.t, end: end >= 0 ? steps[end].t : null, peak, towards, speedKmh, thunder, order: [], gradient: null };
+  if (!trk) return res;
+  const ref = centroid(trk.line);
+  const rad = towards * Math.PI / 180, u = [Math.sin(rad), Math.cos(rad)]; // east, north
+  const ms = Math.max(speedKmh, 1) / 3.6;
+  const proj = ll => { const [x, y] = toXY(ll, ref); return x * u[0] + y * u[1]; };
+  const slow = speedKmh < 6;
+  res.order = trk.corners.map(c => ({ ...c, dt: slow ? 0 : proj(c.ll) / ms * 1000 }))
+    .map(c => ({ ...c, t: firstWet.t + c.dt })).sort((a, b) => a.t - b.t);
+  res.slow = slow;
+  const ps = trk.line.map(proj), lo = Math.min(...ps), hi = Math.max(...ps);
+  res.lineOrder = ps.map(p => hi > lo ? (p - lo) / (hi - lo) : 0);
+  res.spreadMin = slow ? 0 : (hi - lo) / ms / 60;
+  res.ref = ref;
+  return res;
+}
+
+// ---------- strategy ----------
+const TYRE = { S: ["Soft", "var(--soft)"], M: ["Medium", "var(--medium)"], H: ["Hard", "var(--hard)"], I: ["Intermediate", "var(--inter)"], W: ["Full wet", "var(--wet)"] };
+const tyreTag = c => `<span class="tyre" style="color:${TYRE[c][1]}"><i></i>${TYRE[c][0]}</span>`;
+
+function dryPlan(trackC, laps) {
+  if (trackC >= 45) return { stints: [["M", Math.round(laps * .4)], ["H", laps]], why: "a hot track wears tyres fast, so start on the Medium and go long on the Hard", alt: "Two-stop backup: Medium → Hard → Medium if wear is high." };
+  if (trackC >= 30) return { stints: [["M", Math.round(laps * .45)], ["H", laps]], why: "a warm track suits a one-stop: Medium first, then the Hard to the flag", alt: "Undercut option: Soft start, pit early for the Hard." };
+  return { stints: [["S", Math.round(laps * .33)], ["M", laps]], why: "a cool track makes the Hard hard to warm up, so Soft for grip at the start, then the Medium", alt: "If the Soft graining is bad, switch to Medium → Hard." };
+}
+
+// rate(t) in mm/h for a UTC ms timestamp
+function rateFn(r, w, nc) {
+  const sh = +r.start.slice(0, 2);
+  const useNow = nc && !nc.error && nc.steps.length && r.end.getTime() < nc.steps.at(-1).t;
+  if (useNow) return { src: "15-min forecast", fn: t => { const s = nc.steps.find(x => t >= x.t && t < x.t + 15 * 60e3); return s ? s.mmh : 0; }, sw: () => (w.series?.[1]?.sw ?? 0) };
+  if (w && w.kind === "forecast") {
+    // hourly precipitation is the total for the hour ending at that time
+    return { src: "hourly forecast", fn: t => {
+      const hOff = (t - r.utc) / 3600e3 + sh; const s = w.series.find(x => x.h === Math.ceil(hOff)); return s ? s.p : 0;
+    }, sw: t => { const hOff = (t - r.utc) / 3600e3 + sh; const s = w.series.find(x => x.h === Math.round(hOff)); return s ? s.sw : 0; } };
+  }
+  return null;
+}
+
+function buildStrategy(r, w, nc, storm) {
+  if (!w || w.error) return null;
+  const trackC = w.track, laps = r.laps, lapMs = r.lap * 1000;
+  const rf = rateFn(r, w, nc);
+  const calls = [];
+  if (!rf) {
+    const p = dryPlan(trackC, laps);
+    return { src: "Typical", head: `Dry plan for a ${Math.round(toUnit(trackC))}° track: ${p.why}.`, stints: p.stints, calls: [
+      { lap: 1, html: `Lights out on ${tyreTag(p.stints[0][0])}.` },
+      { lap: p.stints[0][1], html: `Box for ${tyreTag(p.stints[1][0])} around lap ${p.stints[0][1]}.` },
+      { lap: "", html: p.alt },
+      ...(w.wetYears ? [{ lap: "", html: `It rained in this race window in ${w.wetYears} of the last ${w.years} years, so the rain plan comes in once the forecast does.` }] : []),
+    ] };
+  }
+  // simulate water on track lap by lap
+  let water = 0, state = "D";
+  const lapsState = [], rates = [];
+  for (let k = 1; k <= laps; k++) {
+    const t = r.utc.getTime() + (k - 0.5) * lapMs;
+    const rate = rf.fn(t), sw = rf.sw(t);
+    const dry = 0.4 + 0.0015 * sw; // mm/h drying, faster in sun
+    water = Math.max(0, water + (rate - dry) * r.lap / 3600 * 3);
+    if (state === "D" && (water > 0.15 || rate >= 0.8)) state = "I";
+    else if (state === "I" && (rate >= 3 || water > 1.5)) state = "W";
+    else if (state === "W" && rate < 2 && water < 1) state = "I";
+    else if (state === "I" && rate < 0.1 && water < 0.05) state = "D";
+    lapsState.push(state); rates.push(rate);
+  }
+  if (lapsState.every(s => s === "D")) {
+    const p = dryPlan(trackC, laps);
+    const maxProb = Math.max(0, ...(w.series || []).map(s => s.prob ?? 0));
+    return { src: rf.src, head: `Dry race expected on a ${Math.round(toUnit(trackC))}° track: ${p.why}.`, stints: p.stints, calls: [
+      { lap: 1, html: `Lights out on ${tyreTag(p.stints[0][0])}.` },
+      { lap: p.stints[0][1], html: `Box for ${tyreTag(p.stints[1][0])} around lap ${p.stints[0][1]}.` },
+      { lap: "", html: p.alt },
+      ...(maxProb >= 30 ? [{ lap: "", html: `Rain chance peaks at ${Math.round(maxProb)}% in the race window. Have ${tyreTag("I")} ready and watch Storm watch.` }] : []),
+    ] };
+  }
+  // compress into stints
+  const runs = [];
+  lapsState.forEach((s, i) => { const k = i + 1; if (!runs.length || runs.at(-1).s !== s) runs.push({ s, from: k, to: k }); else runs.at(-1).to = k; });
+  // drop one-lap blips
+  for (let i = 1; i < runs.length - 1; i++) if (runs[i].to - runs[i].from < 1 && runs[i - 1].s === runs[i + 1].s) { runs[i - 1].to = runs[i + 1].to; runs.splice(i, 2); i--; }
+  const hot = trackC >= 40;
+  const stints = runs.map(run => {
+    let c = run.s;
+    if (c === "D") { const len = run.to - run.from + 1; c = len <= 15 ? "S" : len > 35 && hot ? "H" : "M"; }
+    return [c, run.to, run.from];
+  });
+  const peak = Math.max(...rates);
+  const hitWhere = storm && !storm.dry && storm.order.length && !storm.slow ? ` It reaches the corner ${fmtKm(storm.order[0].at)} into the lap first.` : "";
+  calls.push({ lap: 1, html: `Lights out on ${tyreTag(stints[0][0])}${stints[0][0] === "I" ? " — the track is already wet" : ""}.` });
+  for (let i = 1; i < stints.length; i++) {
+    const [c, , from] = stints[i], prev = stints[i - 1][0], boxLap = from - 1;
+    const tLocal = localTime(new Date(r.utc.getTime() + boxLap * lapMs), r.tz);
+    let why = "";
+    if (c === "I" && ["S", "M", "H"].includes(prev)) why = `Rain arrives around ${tLocal} local. Box at the end of the lap the rain starts, not before: slicks are faster until the track is properly wet.${hitWhere}`;
+    else if (c === "W") why = `Rain gets heavy (over 3 mm/h). Standing water means aquaplaning on Inters.`;
+    else if (c === "I" && prev === "W") why = `Rain easing. Inters are faster once the spray drops.`;
+    else why = `Track drying. Switch when a dry line forms and Inters start overheating.`;
+    calls.push({ lap: `Lap ${boxLap}`, html: `Box for ${tyreTag(c)}. ${why}` });
+  }
+  if (peak >= 8 || (storm && storm.thunder)) calls.push({ lap: "", html: `Thunderstorm risk: heavy rain or lightning usually means a red flag. Race control may restart behind the safety car on ${tyreTag("W")}.` });
+  calls.push({ lap: "", html: `A pit stop costs about 20 seconds; under a safety car it costs about half, so take the tyre change then if the timing is close.` });
+  return { src: rf.src, head: `Wet-weather plan: peak rain about ${peak.toFixed(1)} mm/h during the race.`, stints, calls };
 }
 
 // ---------- rendering ----------
@@ -389,8 +591,7 @@ function srcPill(w, r) {
   if (r.end < Date.now()) return `<span class="pill done">Finished</span>`;
   if (!w) return `<span class="pill">Loading</span>`;
   if (w.error) return `<span class="pill">No data</span>`;
-  const storm = w.storm ? ` <span class="pill storm">Storm</span>` : "";
-  return (w.kind === "forecast" ? `<span class="pill fc">Forecast</span>` : `<span class="pill">Typical</span>`) + storm;
+  return (w.kind === "forecast" ? `<span class="pill fc">Forecast</span>` : `<span class="pill">Typical</span>`) + (w.storm ? `<span class="pill storm">Storm</span>` : "");
 }
 
 function renderList() {
@@ -413,8 +614,7 @@ function renderList() {
 function renderRow(r) {
   const el = $(`row-${r.id}`);
   if (!el) return;
-  const w = weather[r.id];
-  const ok = w && !w.error;
+  const w = weather[r.id], ok = w && !w.error;
   el.querySelector('[data-f="air"]').textContent = ok ? fmtT(w.air) : "–";
   el.querySelector('[data-f="track"]').textContent = ok ? fmtT(w.track) : "–";
   el.querySelector('[data-f="rain"]').textContent = ok ? `${Math.round(w.rain)}%` : "–";
@@ -428,20 +628,21 @@ function countdown(r) {
   return `Lights out in ${d}d ${String(h).padStart(2, "0")}h ${String(m).padStart(2, "0")}m ${String(s).padStart(2, "0")}s`;
 }
 
-function renderChart(series, startHour) {
+function renderChart(series, startHour, hours) {
   const svg = $("d-chart");
   if (!series || series.length < 2) { $("d-hours").hidden = true; return; }
   $("d-hours").hidden = false;
   const W = 320, H = 120, L = 30, R = 8, T = 10, B = 22;
   const vals = series.flatMap(s => [toUnit(s.air), toUnit(s.track)]);
-  let lo = Math.floor(Math.min(...vals) - 2), hi = Math.ceil(Math.max(...vals) + 2);
+  const lo = Math.floor(Math.min(...vals) - 2), hi = Math.ceil(Math.max(...vals) + 2);
   const x = i => L + (W - L - R) * i / (series.length - 1);
   const y = v => T + (H - T - B) * (1 - (v - lo) / (hi - lo));
   const path = f => series.map((s, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(toUnit(s[f])).toFixed(1)}`).join("");
-  const si = series.findIndex(s => s.h === startHour), ei = series.findIndex(s => s.h === startHour + RACE_HOURS);
+  const si = series.findIndex(s => s.h === startHour);
+  const ei = Math.min(series.length - 1, si + hours);
   const ticks = [lo, Math.round((lo + hi) / 2), hi];
   svg.innerHTML = `
-    ${si >= 0 && ei >= 0 ? `<rect x="${x(si)}" y="${T}" width="${x(ei) - x(si)}" height="${H - T - B}" fill="var(--panel-2)"/>` : ""}
+    ${si >= 0 ? `<rect x="${x(si)}" y="${T}" width="${(x(1) - x(0)) * (ei - si)}" height="${H - T - B}" fill="var(--panel-2)"/>` : ""}
     ${ticks.map(t => `<line x1="${L}" x2="${W - R}" y1="${y(t)}" y2="${y(t)}" stroke="var(--line)" stroke-width="1"/><text x="${L - 6}" y="${y(t) + 4}" text-anchor="end" font-size="10" fill="var(--muted)" font-family="JetBrains Mono, monospace">${t}°</text>`).join("")}
     ${series.map((s, i) => `<text x="${x(i)}" y="${H - 6}" text-anchor="middle" font-size="10" fill="var(--muted)" font-family="JetBrains Mono, monospace">${String(s.h % 24).padStart(2, "0")}</text>`).join("")}
     <path d="${path("track")}" fill="none" stroke="var(--track)" stroke-width="2.5" stroke-linejoin="round"/>
@@ -454,7 +655,7 @@ function renderDetail() {
   const r = selected;
   if (!r) return;
   const w = weather[r.id], ok = w && !w.error;
-  $("d-round").textContent = `${r.y} · Round ${r.r}${r.provisional ? " · provisional" : ""}${r.night ? " · night race" : ""}`;
+  $("d-round").textContent = `${r.y} · Round ${r.r} · ${r.laps} laps${r.provisional ? " · provisional" : ""}${r.night ? " · night race" : ""}`;
   $("d-name").textContent = r.gp;
   $("d-where").textContent = `${r.c} · ${r.city} · ${weekday(r)}, ${r.start} local`;
   $("d-count").textContent = countdown(r);
@@ -476,80 +677,208 @@ function renderDetail() {
     : w.error ? `Couldn't load weather (${w.error}). It retries every few minutes.`
     : w.kind === "forecast" ? "Live hourly forecast for the race window. Refreshes every 30 minutes."
     : `Too far out for a forecast. These are the conditions on ${shortDate(r)} at ${r.start} in each of the last ${w.years} years, averaged.${w.stormYears ? ` Thunderstorms hit the race window in ${w.stormYears} of those years.` : ""} The forecast takes over about ${FORECAST_DAYS} days before the race.`;
-  renderChart(ok ? w.series : null, +r.start.slice(0, 2));
+  renderChart(ok ? w.series : null, +r.start.slice(0, 2), Math.ceil(r.hours));
   document.querySelectorAll(".race[data-id]").forEach(b => b.setAttribute("aria-current", b.dataset.id === r.id));
 }
+
+let lastStorm = null;
+function renderStorm() {
+  const r = selected; if (!r) return;
+  const nc = nowcast[`${r.lat},${r.lon}`];
+  const s = lastStorm = projectStorm(r, nc);
+  const eta = $("sw-eta"), order = $("sw-order");
+  order.innerHTML = ""; $("sw-motion").textContent = ""; $("sw-note").textContent = "";
+  const daysOut = (r.utc - Date.now()) / 86400e3;
+  $("sw-src").textContent = daysOut > 2 ? "Now, not race day" : "Live";
+  if (!nc) { eta.className = "big dry"; eta.textContent = "Loading"; $("sw-sub").textContent = ""; drawStormOnMap(null); return; }
+  if (nc.error || !s) { eta.className = "big dry"; eta.textContent = "No data"; $("sw-sub").textContent = `Couldn't load the rain forecast (${nc.error || "empty"}).`; drawStormOnMap(null); return; }
+  if (s.dry) {
+    eta.className = "big dry"; eta.textContent = "Dry";
+    $("sw-sub").textContent = `No rain expected at ${r.c} for the next ${NOW_HOURS} hours.`;
+    $("sw-note").textContent = "Checks again every 15 minutes. The radar on the map shows anything building nearby.";
+    drawStormOnMap(null); return;
+  }
+  const farOff = daysOut > 2 ? ` The race is ${Math.round(daysOut)} days away, so this is today's weather at the circuit.` : "";
+  const tz = r.tz, mins = Math.round((s.start - Date.now()) / 60e3);
+  eta.className = "big";
+  eta.textContent = mins <= 0 ? "Raining now" : `${localDay(new Date(s.start), tz)} ${localTime(new Date(s.start), tz)}`;
+  $("sw-sub").textContent = `${mins > 0 ? `in ${mins >= 120 ? Math.round(mins / 60) + " h" : mins + " min"}, ` : ""}local time at the track · peak ${s.peak.toFixed(1)} mm/h${s.end ? `, easing by ${localTime(new Date(s.end), tz)}` : ""}${s.thunder ? " · thunderstorms likely" : ""}`;
+  $("sw-motion").textContent = s.slow
+    ? "The rain is barely moving, so it should cover the whole circuit at about the same time."
+    : `Rain moving ${compass(s.towards)} at ${fmtWind(s.speedKmh)}.${s.spreadMin != null ? ` It takes about ${Math.max(1, Math.round(s.spreadMin))} min to cross the circuit.` : ""}`;
+  if (!s.slow && s.order.length) {
+    const first = s.order.slice(0, 4), last = s.order.at(-1);
+    order.innerHTML = first.map((c, i) => `<li><b>${i + 1}</b><span>Corner ${fmtKm(c.at)} into the lap</span><span class="t">${localTime(new Date(c.t), tz)}</span></li>`).join("")
+      + `<li><b>↓</b><span>Last to get wet: corner ${fmtKm(last.at)} into the lap</span><span class="t">${localTime(new Date(last.t), tz)}</span></li>`;
+    $("sw-note").textContent = "Highlighted on the map: yellow gets wet first, blue last." + farOff;
+  } else $("sw-note").textContent = farOff.trim();
+  drawStormOnMap(s);
+}
+
+function renderStrategy() {
+  const r = selected; if (!r) return;
+  const w = weather[r.id], nc = nowcast[`${r.lat},${r.lon}`];
+  const st = buildStrategy(r, w, nc, lastStorm);
+  if (!st) { $("st-src").textContent = "–"; $("st-head").textContent = w && w.error ? "Needs weather data." : "Working it out…"; $("st-bar").innerHTML = ""; $("st-calls").innerHTML = ""; return; }
+  $("st-src").textContent = st.src;
+  $("st-head").textContent = st.head;
+  let prev = 0;
+  $("st-bar").innerHTML = st.stints.map(([c, to]) => { const n = to - prev; const html = `<div style="flex:${n};background:${TYRE[c][1]}" title="${TYRE[c][0]} laps ${prev + 1}–${to}">${n >= 4 ? c : ""}</div>`; prev = to; return html; }).join("");
+  $("st-mid").textContent = `Lap ${Math.round(r.laps / 2)}`;
+  $("st-end").textContent = `Lap ${r.laps}`;
+  $("st-calls").innerHTML = st.calls.map(c => `<li><span class="lap">${typeof c.lap === "number" ? "Lap " + c.lap : c.lap}</span><span>${c.html}</span></li>`).join("");
+}
+
+function renderAll() { renderDetail(); renderStorm(); renderStrategy(); }
 
 function select(r, fly = true) {
   selected = r;
   store.set("sel", r.id);
-  renderDetail();
-  if (map) {
-    marker.setLatLng([r.lat, r.lon]).bindTooltip(r.c, { permanent: false });
-    fly ? map.flyTo([r.lat, r.lon], 6, { duration: 0.8 }) : map.setView([r.lat, r.lon], 6);
-  }
-  loadRace(r).then(() => { renderRow(r); if (selected === r) renderDetail(); });
+  renderAll();
+  tracksReady.then(() => showTrack(r, fly));
+  Promise.all([loadRace(r), loadNow(r)]).then(() => { renderRow(r); if (selected === r) renderAll(); });
 }
 
-// ---------- map ----------
-let map, marker, radarLayer, irLayer, trueLayer, frames = [], irFrames = [], rvHost = "", playing = null;
+// ---------- map (MapLibre: satellite, radar, 3D terrain) ----------
+let map, pin, hitMarkers = [], arrowMarker, mapReady = false, frames = [], irFrames = [], rvHost = "", playing = null, is3D = false, view = "track";
+const rv = (f, kind) => kind === "ir" ? `${rvHost}${f.path}/256/{z}/{x}/{y}/0/0_0.png` : `${rvHost}${f.path}/256/{z}/{x}/{y}/2/1_1.png`;
 function initMap() {
-  if (!window.L) { $("map").innerHTML = `<p class="note" style="padding:16px">The map library didn't load. Check your connection and reload.</p>`; return; }
-  map = L.map("map", { zoomControl: true, worldCopyJump: true, attributionControl: true }).setView([20, 0], 2);
-  L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
-    maxZoom: 18, attribution: "Imagery © Esri",
-  }).addTo(map);
+  if (!window.maplibregl) { $("map").innerHTML = `<p class="note" style="padding:16px">The map didn't load. Check your connection and reload.</p>`; return; }
   const yday = new Date(Date.now() - 86400e3).toISOString().slice(0, 10);
-  trueLayer = L.tileLayer(`https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/VIIRS_NOAA20_CorrectedReflectance_TrueColor/default/${yday}/GoogleMapsCompatible_Level9/{z}/{y}/{x}.jpg`, {
-    maxNativeZoom: 9, maxZoom: 18, opacity: 0.85, attribution: "NASA GIBS",
+  map = new maplibregl.Map({
+    container: "map", center: [0, 20], zoom: 2, maxPitch: 75, attributionControl: { compact: true },
+    style: {
+      version: 8,
+      sources: {
+        esri: { type: "raster", tiles: ["https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"], tileSize: 256, maxzoom: 19, attribution: "Imagery © Esri" },
+        places: { type: "raster", tiles: ["https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}"], tileSize: 256, maxzoom: 19 },
+        truecolor: { type: "raster", tiles: [`https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/VIIRS_NOAA20_CorrectedReflectance_TrueColor/default/${yday}/GoogleMapsCompatible_Level9/{z}/{y}/{x}.jpg`], tileSize: 256, maxzoom: 9, attribution: "NASA GIBS" },
+        dem: { type: "raster-dem", tiles: ["https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"], encoding: "terrarium", tileSize: 256, maxzoom: 14, attribution: "Terrain: AWS / Mapzen" },
+      },
+      layers: [
+        { id: "esri", type: "raster", source: "esri" },
+        { id: "truecolor", type: "raster", source: "truecolor", paint: { "raster-opacity": 0.85 }, layout: { visibility: "none" } },
+        { id: "places", type: "raster", source: "places", paint: { "raster-opacity": 0.9 } },
+      ],
+    },
   });
-  L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}", {
-    maxZoom: 18, pane: "overlayPane", zIndex: 650,
-  }).addTo(map);
-  marker = L.circleMarker([0, 0], { radius: 8, color: "#ff4d5e", weight: 3, fillColor: "#ffffff", fillOpacity: 1 }).addTo(map);
-  loadRadar();
+  map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "top-right");
+  map.on("load", () => {
+    map.addSource("track", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+    map.addLayer({ id: "track-casing", type: "line", source: "track", paint: { "line-color": "#000", "line-width": 7, "line-opacity": .55 }, layout: { "line-join": "round", "line-cap": "round" } });
+    map.addLayer({ id: "track", type: "line", source: "track", paint: { "line-color": ["coalesce", ["get", "color"], "#ff4d5e"], "line-width": 4 }, layout: { "line-join": "round", "line-cap": "round" } });
+    mapReady = true;
+    if (selected) showTrack(selected, false);
+    loadRadar();
+  });
+  pin = new maplibregl.Marker({ element: Object.assign(document.createElement("div"), { className: "mk-pin" }) });
   setInterval(loadRadar, 10 * 60e3);
 }
 
-function rvTile(frame, kind) {
-  return kind === "ir" ? `${rvHost}${frame.path}/256/{z}/{x}/{y}/0/0_0.png` : `${rvHost}${frame.path}/256/{z}/{x}/{y}/2/1_1.png`;
+function trackFeatures(trk, order) {
+  const feats = [];
+  for (let i = 0; i < trk.line.length - 1; i++) {
+    let color = null;
+    if (order) { const o = (order[i] + order[i + 1]) / 2; color = `hsl(${Math.round(50 + o * 150)}, 95%, ${Math.round(58 - o * 4)}%)`; }
+    feats.push({ type: "Feature", properties: { color }, geometry: { type: "LineString", coordinates: [trk.line[i], trk.line[i + 1]] } });
+  }
+  return { type: "FeatureCollection", features: feats };
 }
+
+function frameView(r, animate) {
+  const trk = TRACKS[r.trk];
+  const opts = { pitch: is3D ? 62 : 0, bearing: is3D ? -25 : 0, duration: animate ? 900 : 0 };
+  if (view === "track" && trk) {
+    const xs = trk.line.map(p => p[0]), ys = trk.line.map(p => p[1]);
+    map.fitBounds([[Math.min(...xs), Math.min(...ys)], [Math.max(...xs), Math.max(...ys)]], { padding: 50, ...opts });
+  } else {
+    map.easeTo({ center: [r.lon, r.lat], zoom: 6.5, ...opts });
+  }
+}
+
+function showTrack(r, animate) {
+  if (!map || !mapReady) return;
+  const trk = TRACKS[r.trk];
+  map.getSource("track").setData(trk ? trackFeatures(trk, lastStorm && !lastStorm.dry && !lastStorm.slow ? lastStorm.lineOrder : null) : { type: "FeatureCollection", features: [] });
+  pin.setLngLat(trk ? centroid(trk.line) : [r.lon, r.lat]).addTo(map);
+  frameView(r, animate);
+  drawStormOnMap(lastStorm);
+}
+
+function drawStormOnMap(s) {
+  if (!map || !mapReady || !selected) return;
+  hitMarkers.forEach(m => m.remove()); hitMarkers = [];
+  if (arrowMarker) { arrowMarker.remove(); arrowMarker = null; }
+  const trk = TRACKS[selected.trk];
+  if (!trk) return;
+  map.getSource("track").setData(trackFeatures(trk, s && !s.dry && !s.slow ? s.lineOrder : null));
+  if (!s || s.dry) return;
+  if (!s.slow) {
+    s.order.slice(0, 3).forEach((c, i) => {
+      const el = document.createElement("div"); el.className = "mk-hit"; el.textContent = ["1st", "2nd", "3rd"][i];
+      hitMarkers.push(new maplibregl.Marker({ element: el, anchor: "bottom", offset: [0, -6] }).setLngLat(c.ll).addTo(map));
+    });
+    // arrow placed upwind of the circuit, pointing the way the rain is moving
+    const ref = s.ref, back = (s.towards + 180) * Math.PI / 180;
+    const xs = trk.line.map(p => p[0]), span = (Math.max(...xs) - Math.min(...xs)) * 0.5 + 0.002;
+    const at = [ref[0] + Math.sin(back) * span, ref[1] + Math.cos(back) * span * Math.cos(ref[1] * Math.PI / 180)];
+    const el = document.createElement("div"); el.className = "mk-arrow";
+    el.innerHTML = `<svg width="44" height="44" viewBox="0 0 44 44" style="transform:rotate(${s.towards}deg)"><path d="M22 3 L34 25 L25 22 L25 41 L19 41 L19 22 L10 25 Z" fill="#4cc3ff" stroke="#0b0f14" stroke-width="2"/></svg><span>Rain ${fmtWind(s.speedKmh)}</span>`;
+    arrowMarker = new maplibregl.Marker({ element: el, rotationAlignment: "viewport" }).setLngLat(at).addTo(map);
+  }
+}
+
 async function loadRadar() {
   try {
     const j = await getJSON("https://api.rainviewer.com/public/weather-maps.json");
     rvHost = j.host;
     frames = (j.radar && j.radar.past) || [];
     irFrames = (j.satellite && j.satellite.infrared) || [];
-    showFrame(frames.length - 1);
-  } catch (e) {
-    $("stamp").textContent = "Radar unavailable";
+    if (map && mapReady) showFrame(frames.length - 1);
+  } catch { $("stamp").textContent = "Radar unavailable"; }
+}
+function setRaster(id, url, opacity, before) {
+  const src = map.getSource(id);
+  if (!url) { if (map.getLayer(id)) map.removeLayer(id); if (src) map.removeSource(id); return; }
+  if (src && src.setTiles) src.setTiles([url]);
+  else {
+    if (map.getLayer(id)) map.removeLayer(id); if (src) map.removeSource(id);
+    map.addSource(id, { type: "raster", tiles: [url], tileSize: 256, maxzoom: 7, attribution: "RainViewer" });
+    map.addLayer({ id, type: "raster", source: id, paint: { "raster-opacity": opacity, "raster-fade-duration": 0 } }, before);
   }
-  syncLayers();
 }
 function showFrame(i) {
-  if (!map) return;
-  const f = frames[i], g = irFrames[Math.min(i, irFrames.length - 1)];
-  if (radarLayer) map.removeLayer(radarLayer);
-  if (irLayer) map.removeLayer(irLayer);
-  radarLayer = f ? L.tileLayer(rvTile(f, "radar"), { opacity: 0.75, maxNativeZoom: 7, maxZoom: 18, zIndex: 500, attribution: "RainViewer" }) : null;
-  irLayer = g ? L.tileLayer(rvTile(g, "ir"), { opacity: 0.6, maxNativeZoom: 7, maxZoom: 18, zIndex: 400, attribution: "RainViewer" }) : null;
-  $("lyr-ir").disabled = !irLayer;
-  $("lyr-ir").parentElement.title = irLayer ? "" : "Infrared satellite isn't available from the provider right now";
-  const t = (f || g) ? new Date(((f || g).time) * 1000) : null;
+  if (!map || !mapReady) return;
+  const f = frames[i], g = irFrames.length ? irFrames[Math.min(i, irFrames.length - 1)] : null;
+  setRaster("ir", g ? rv(g, "ir") : null, 0.6, "places");
+  setRaster("radar", f ? rv(f, "radar") : null, 0.75, "places");
+  $("lyr-ir").disabled = !g;
+  $("lyr-ir").parentElement.title = g ? "" : "The infrared feed isn't available from the provider right now";
+  const t = (f || g) ? new Date((f || g).time * 1000) : null;
   $("stamp").textContent = t ? `Radar ${t.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} your time` : "–";
   syncLayers();
 }
 function syncLayers() {
-  if (!map) return;
-  const want = [[irLayer, $("lyr-ir").checked], [radarLayer, $("lyr-radar").checked], [trueLayer, $("lyr-true").checked]];
-  want.forEach(([l, on]) => { if (!l) return; on ? l.addTo(map) : map.removeLayer(l); });
+  if (!map || !mapReady) return;
+  [["ir", "lyr-ir"], ["radar", "lyr-radar"], ["truecolor", "lyr-true"]].forEach(([id, cb]) => {
+    if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", $(cb).checked ? "visible" : "none");
+  });
 }
 function togglePlay() {
   if (playing) { clearInterval(playing); playing = null; $("play").textContent = "Play last 2 h"; showFrame(frames.length - 1); return; }
   if (!frames.length) return;
-  let i = 0;
-  $("play").textContent = "Stop";
-  playing = setInterval(() => { showFrame(i); i = (i + 1) % frames.length; }, 700);
+  let i = 0; $("play").textContent = "Stop";
+  playing = setInterval(() => { showFrame(i); i = (i + 1) % frames.length; }, 800);
+}
+function set3D(on) {
+  is3D = on; $("v-3d").setAttribute("aria-pressed", on);
+  if (!map || !mapReady) return;
+  map.setTerrain(on ? { source: "dem", exaggeration: 1.6 } : null);
+  if (selected) frameView(selected, true);
+}
+function setView(v) {
+  view = v; $("v-track").setAttribute("aria-pressed", v === "track"); $("v-region").setAttribute("aria-pressed", v === "region");
+  if (selected && map && mapReady) frameView(selected, true);
 }
 
 // ---------- wiring ----------
@@ -561,16 +890,24 @@ function setSeason(y) {
   if (!selected || selected.y !== y || !list.includes(selected)) { if (list[0]) select(list[0]); }
   loadAll(list);
 }
+async function loadAll(list) {
+  const queue = list.slice();
+  const worker = async () => { while (queue.length) { const r = queue.shift(); await loadRace(r); renderRow(r); if (r === selected) renderAll(); } };
+  await Promise.all([worker(), worker(), worker()]);
+}
 function setUnit(u) {
   unit = u; store.set("unit", u);
   $("uF").setAttribute("aria-pressed", u === "F"); $("uC").setAttribute("aria-pressed", u === "C");
-  visible().forEach(renderRow); renderDetail();
+  visible().forEach(renderRow); renderAll();
 }
 $("s2026").onclick = () => setSeason(2026);
 $("s2027").onclick = () => setSeason(2027);
 $("uF").onclick = () => setUnit("F");
 $("uC").onclick = () => setUnit("C");
-$("rows").addEventListener("click", e => { const b = e.target.closest(".race[data-id]"); if (b) { select(RACES.find(r => r.id === b.dataset.id)); if (innerWidth < 820) scrollTo({ top: 0, behavior: "smooth" }); } });
+$("v-track").onclick = () => setView("track");
+$("v-region").onclick = () => setView("region");
+$("v-3d").onclick = () => set3D(!is3D);
+$("rows").addEventListener("click", e => { const b = e.target.closest(".race[data-id]"); if (b) { select(RACES.find(r => r.id === b.dataset.id)); if (innerWidth < 860) scrollTo({ top: 0, behavior: "smooth" }); } });
 ["lyr-ir", "lyr-radar", "lyr-true"].forEach(id => $(id).addEventListener("change", syncLayers));
 $("play").onclick = togglePlay;
 
@@ -581,9 +918,9 @@ setUnit(unit);
 if (savedSel) select(savedSel, false);
 setSeason(season);
 setInterval(() => { if (selected) $("d-count").textContent = countdown(selected); }, 1000);
-// Refresh forecasts every 30 min, and retry failures every 5.
-setInterval(() => visible().filter(inForecastRange).forEach(r => loadRace(r, true).then(() => { renderRow(r); if (r === selected) renderDetail(); })), 30 * 60e3);
-setInterval(() => visible().filter(r => weather[r.id] && weather[r.id].error).forEach(r => loadRace(r, true).then(() => { renderRow(r); if (r === selected) renderDetail(); })), 5 * 60e3);
+setInterval(() => visible().filter(inForecastRange).forEach(r => loadRace(r, true).then(() => { renderRow(r); if (r === selected) renderAll(); })), 30 * 60e3);
+setInterval(() => { if (selected) loadNow(selected, true).then(renderAll); }, 15 * 60e3);
+setInterval(() => visible().filter(r => weather[r.id] && weather[r.id].error).forEach(r => loadRace(r, true).then(() => { renderRow(r); if (r === selected) renderAll(); })), 5 * 60e3);
 </script>
 </body>
 </html>
